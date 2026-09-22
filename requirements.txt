@@ -1,6 +1,5 @@
-python-telegram-bot
-requests
-python-telegram-bot
-requests
 flask
+flask-cors
 gunicorn
+requests
+python-telegram-bot
