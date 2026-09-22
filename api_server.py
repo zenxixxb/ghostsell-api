@@ -12,13 +12,16 @@ BALANCE_FILE = "balance.json"
 DATA_FILE = "products.json"
 ORDERS_FILE = "orders.json"
 PROMO_FILE = "promo.json"
+CODE_REQUESTS_FILE = "code_requests.json"
 
-# ========== СЕКРЕТНЫЙ КЛЮЧ ==========
-# Придумай свой и используй ТОЧНО ТАКОЙ ЖЕ в admin_bot.py
+# ========== СЕКРЕТНЫЙ КЛЮЧ ДЛЯ СИНХРОНИЗАЦИИ ==========
 SYNC_SECRET = "ghostsell_2026_secret_key"
 
-# ========== ТОКЕН БОТА (для уведомлений) ==========
+# ========== ТОКЕН БОТА ==========
 BOT_TOKEN = "8836260327:AAGxBaWF_YWpTJr1H1Q1gsdNKbkUqM_WJOQ"
+
+# ========== ID АДМИНОВ ==========
+АДМИНЫ = [7940562298, 6169533449]
 
 
 def load_json(file):
@@ -66,7 +69,7 @@ def get_products():
     for key, product in data.items():
         if product.get("hidden", False):
             continue
-        # Считаем только РЕАЛЬНЫЕ номера (не "Номер X" и не пустые)
+        # Считаем только реальные номера (не "Номер X" и не пустые)
         real_items = [
             i for i in product.get("items", [])
             if isinstance(i, dict) and i.get("number") and not i.get("number").startswith("Номер")
@@ -157,11 +160,46 @@ def get_orders():
     return jsonify({"orders": user_orders[::-1]})
 
 
+# ========== ЗАПРОС КОДА ДЛЯ ВХОДА ==========
+
+@app.route('/api/request_code', methods=['POST'])
+def request_code():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    phone = data.get('phone', '')
+    order_index = data.get('order_index', 0)
+
+    if not phone:
+        return jsonify({"success": False, "error": "Нет номера телефона"})
+
+    requests_data = load_json(CODE_REQUESTS_FILE)
+    if user_id not in requests_data:
+        requests_data[user_id] = []
+    requests_data[user_id].append({
+        "phone": phone,
+        "order_index": order_index,
+        "timestamp": str(datetime.now()),
+        "status": "в ожидании"
+    })
+    save_json(CODE_REQUESTS_FILE, requests_data)
+
+    for admin_id in АДМИНЫ:
+        send_telegram_message(
+            admin_id,
+            f"🔑 *Запрос кода для входа*\n\n"
+            f"👤 ID юзера: `{user_id}`\n"
+            f"📱 Номер: `{phone}`\n"
+            f"📦 Заказ: #{order_index}\n\n"
+            f"Запусти listener.py с этим номером."
+        )
+
+    return jsonify({"success": True, "message": "Запрос отправлен, код придёт в бота"})
+
+
 # ========== СИНХРОНИЗАЦИЯ С АДМИН-БОТОМ ==========
 
 @app.route('/api/sync_products', methods=['POST'])
 def sync_products():
-    """Принимает products.json от админ-бота"""
     data = request.json
     secret = data.get('secret', '')
 
@@ -178,7 +216,6 @@ def sync_products():
 
 @app.route('/api/sync_balance', methods=['POST'])
 def sync_balance():
-    """Принимает balance.json от админ-бота"""
     data = request.json
     secret = data.get('secret', '')
 
