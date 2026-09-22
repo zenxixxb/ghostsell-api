@@ -1,6 +1,8 @@
 import json
 import os
-from flask import Flask, request, jsonify, send_from_directory
+import requests
+from datetime import datetime
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -11,6 +13,9 @@ DATA_FILE = "products.json"
 ORDERS_FILE = "orders.json"
 PROMO_FILE = "promo.json"
 
+# Токен бота — чтобы отправлять уведомления
+BOT_TOKEN = "8836260327:AAGxBaWF_YWpTJr1H1Q1gsdNKbkUqM_WJOQ"
+
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
@@ -20,6 +25,18 @@ def load_json(file):
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+def send_telegram_message(user_id, text):
+    """Отправляет уведомление пользователю в Telegram"""
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, json={
+            "chat_id": user_id,
+            "text": text,
+            "parse_mode": "Markdown"
+        }, timeout=5)
+    except Exception as e:
+        print(f"Ошибка отправки уведомления: {e}")
 
 @app.route('/')
 def index():
@@ -58,7 +75,6 @@ def buy():
     user_id = str(data.get('user_id', ''))
     product_key = data.get('key', '')
     
-    # Загружаем товары
     products = load_json(DATA_FILE)
     if product_key not in products:
         return jsonify({"success": False, "error": "Товар не найден"})
@@ -66,14 +82,12 @@ def buy():
     product = products[product_key]
     price = product.get("price_rub", 0)
     
-    # Проверяем баланс
     balances = load_json(BALANCE_FILE)
     user_balance = balances.get(user_id, 0)
     
     if user_balance < price:
         return jsonify({"success": False, "error": f"Недостаточно средств. Баланс: {user_balance} ₽, нужно: {price} ₽"})
     
-    # Находим номер
     items = product.get("items", [])
     number = None
     for i, item in enumerate(items):
@@ -85,12 +99,10 @@ def buy():
     if not number:
         return jsonify({"success": False, "error": "Товар закончился"})
     
-    # Списываем баланс
     balances[user_id] = user_balance - price
     save_json(BALANCE_FILE, balances)
     save_json(DATA_FILE, products)
     
-    # Сохраняем заказ
     orders = load_json(ORDERS_FILE)
     if user_id not in orders:
         orders[user_id] = []
@@ -99,11 +111,21 @@ def buy():
         "product": product.get("name", product_key),
         "price": price,
         "status": "одобрен",
-        "date": str(__import__('datetime').datetime.now()),
+        "date": str(datetime.now()),
         "number": number,
         "phone": number
     })
     save_json(ORDERS_FILE, orders)
+    
+    # Уведомление пользователю в бот
+    send_telegram_message(
+        user_id,
+        f"✅ *Покупка совершена!*\n\n"
+        f"📦 Товар: {product.get('name')}\n"
+        f"💰 Сумма: {price} ₽\n"
+        f"📱 Номер: `{number}`\n"
+        f"💳 Остаток: {balances[user_id]} ₽"
+    )
     
     return jsonify({
         "success": True,
@@ -111,6 +133,15 @@ def buy():
         "balance": balances[user_id],
         "message": f"Покупка успешна! Номер: {number}"
     })
+
+@app.route('/api/orders', methods=['POST'])
+def get_orders():
+    """Возвращает заказы пользователя"""
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    orders = load_json(ORDERS_FILE)
+    user_orders = orders.get(user_id, [])
+    return jsonify({"orders": user_orders[::-1]})  # Свежие сверху
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
