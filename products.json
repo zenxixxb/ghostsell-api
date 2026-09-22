@@ -6,7 +6,48 @@
     "price_stars": 35,
     "desc": "2024 год",
     "hidden": false,
-    "items": []
+    "items": [
+      {
+        "number": "Номер 1",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 2",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 3",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 4",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 5",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 6",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 7",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 8",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 9",
+        "category": "no_spam"
+      },
+      {
+        "number": "Номер 10",
+        "category": "no_spam"
+      }
+    ]
   },
   "uzbekistan": {
     "name": "Узбекистан (+998)",
