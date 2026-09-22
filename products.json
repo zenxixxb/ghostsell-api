@@ -1,0 +1,52 @@
+{
+  "india": {
+    "name": "Индия (+91)",
+    "emoji": "🇮🇳",
+    "price_rub": 50,
+    "price_stars": 35,
+    "desc": "2024 год",
+    "hidden": false,
+    "items": []
+  },
+  "uzbekistan": {
+    "name": "Узбекистан (+998)",
+    "emoji": "🇺🇿",
+    "price_rub": 80,
+    "price_stars": 56,
+    "desc": "2025 год",
+    "hidden": false,
+    "items": []
+  },
+  "brazil": {
+    "name": "Бразилия (+55)",
+    "emoji": "🇧🇷",
+    "price_rub": 70,
+    "price_stars": 49,
+    "desc": "2023 год",
+    "hidden": false,
+    "items": []
+  },
+  "россия_7": {
+    "name": "Россия (+7)",
+    "emoji": "🌍",
+    "price_rub": 120,
+    "price_stars": 84,
+    "desc": "",
+    "hidden": false,
+    "items": [
+      {
+        "number": "Номер 1",
+        "category": "no_spam"
+      }
+    ]
+  },
+  "мьянма_95": {
+    "name": "Мьянма (+95)",
+    "emoji": "🌍",
+    "price_rub": 70,
+    "price_stars": 49,
+    "desc": "",
+    "hidden": false,
+    "items": []
+  }
+}

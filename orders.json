@@ -1,0 +1,32 @@
+{
+  "7940562298": [
+    {
+      "username": "Big_Pashka",
+      "product": "Индия (+91)",
+      "price_rub": 50,
+      "amount_ton": 0.1,
+      "status": "одобрен",
+      "date": "2026-09-05 23:09:27.322417",
+      "item": "Номер 5",
+      "phone": "Номер 5",
+      "password": "",
+      "time_created": 1788638967.3224611,
+      "has_screen": true,
+      "screen_file": "screens/user_7940562298_order_0_1788638972.jpg"
+    },
+    {
+      "username": "Big_Pashka",
+      "product": "Индия (+91)",
+      "price_rub": 50,
+      "amount_ton": 0.1,
+      "status": "отклонён",
+      "date": "2026-09-05 23:31:38.827188",
+      "item": "Номер 6",
+      "phone": "Номер 6",
+      "password": "",
+      "time_created": 1788640298.8272176,
+      "has_screen": true,
+      "screen_file": "screens/user_7940562298_order_1_1788640306.jpg"
+    }
+  ]
+}
