@@ -157,40 +157,22 @@ def buy():
             sellers[sid]["total_sold"] = sellers[sid].get("total_sold", 0) + 1
             sellers[sid]["total_earned"] = sellers[sid].get("total_earned", 0) + seller_share
             save_json(SELLERS_FILE, sellers)
-
-            send_telegram_message(
-                int(sid),
-                f"💰 *Новая продажа!*\n\n"
-                f"📦 Товар: {product.get('name')}\n"
-                f"💵 Продано за: {price} ₽\n"
-                f"🏦 Комиссия ({commission}%): {price - seller_share} ₽\n"
-                f"✅ Вам: {seller_share} ₽"
-            )
+            send_telegram_message(int(sid),
+                f"💰 *Новая продажа!*\n\n📦 {product.get('name')}\n💵 Продано за: {price} ₽\n🏦 Комиссия ({commission}%): {price - seller_share} ₽\n✅ Вам: {seller_share} ₽")
 
     orders = load_json(ORDERS_FILE)
     if user_id not in orders:
         orders[user_id] = []
     orders[user_id].append({
-        "username": "mini_app",
-        "product": product.get("name", product_key),
-        "price_rub": price,
-        "price": price,
-        "status": "одобрен",
-        "date": str(datetime.now()),
-        "number": number,
-        "phone": number
+        "username": "mini_app", "product": product.get("name", product_key),
+        "price_rub": price, "price": price, "status": "одобрен",
+        "date": str(datetime.now()), "number": number, "phone": number
     })
     save_json(ORDERS_FILE, orders)
 
     discount_text = f"\n🎰 Скидка: {user_discount}%" if user_discount > 0 else ""
-    send_telegram_message(
-        user_id,
-        f"✅ *Покупка совершена!*\n\n"
-        f"📦 Товар: {product.get('name')}\n"
-        f"💰 Сумма: {price} ₽{discount_text}\n"
-        f"📱 Номер: `{number}`\n"
-        f"💳 Остаток: {balances[user_id]} ₽"
-    )
+    send_telegram_message(user_id,
+        f"✅ *Покупка совершена!*\n\n📦 {product.get('name')}\n💰 {price} ₽{discount_text}\n📱 Номер: `{number}`\n💳 Остаток: {balances[user_id]} ₽")
 
     return jsonify({"success": True, "number": number, "balance": balances[user_id], "message": f"Покупка успешна! Номер: {number}"})
 
@@ -221,22 +203,13 @@ def request_code():
     order_index = data.get('order_index', 0)
     if not phone:
         return jsonify({"success": False, "error": "Нет номера телефона"})
-
     requests_data = load_json(CODE_REQUESTS_FILE)
     if user_id not in requests_data:
         requests_data[user_id] = []
-    requests_data[user_id].append({
-        "phone": phone,
-        "order_index": order_index,
-        "timestamp": str(datetime.now()),
-        "status": "в ожидании"
-    })
+    requests_data[user_id].append({"phone": phone, "order_index": order_index, "timestamp": str(datetime.now()), "status": "в ожидании"})
     save_json(CODE_REQUESTS_FILE, requests_data)
-
     for admin_id in АДМИНЫ:
-        send_telegram_message(admin_id,
-            f"🔑 *Запрос кода*\n\n👤 ID: `{user_id}`\n📱 Номер: `{phone}`\n📦 Заказ: #{order_index}")
-
+        send_telegram_message(admin_id, f"🔑 *Запрос кода*\n\n👤 ID: `{user_id}`\n📱 Номер: `{phone}`\n📦 Заказ: #{order_index}")
     return jsonify({"success": True, "message": "Запрос отправлен"})
 
 
@@ -258,11 +231,9 @@ def claim_bonus():
     bonuses = load_json(BONUS_FILE)
     if bonuses.get(user_id, {}).get('last_claim') == today:
         return jsonify({"success": False, "error": "Уже забрано сегодня"})
-
     balances = load_json(BALANCE_FILE)
     balances[user_id] = balances.get(user_id, 0) + 5
     save_json(BALANCE_FILE, balances)
-
     bonuses[user_id] = {"last_claim": today}
     save_json(BONUS_FILE, bonuses)
     return jsonify({"success": True, "amount": 5})
@@ -305,10 +276,8 @@ def spin_wheel():
     now = datetime.now().timestamp()
     if (now - last_spin) < 7 * 24 * 60 * 60:
         return jsonify({"success": False, "error": "Ещё рано"})
-
     wheels[user_id] = {"last_spin": now}
     save_json(WHEEL_FILE, wheels)
-
     if discount > 0:
         discounts = load_json(DISCOUNTS_FILE)
         discounts[user_id] = discount
@@ -333,14 +302,7 @@ def seller_products():
     result = []
     for key, product in products.items():
         if str(product.get("seller_id", "")) == user_id:
-            result.append({
-                "key": key,
-                "name": product.get("name", key),
-                "emoji": product.get("emoji", "🌍"),
-                "price": product.get("price_rub", 0),
-                "count": count_real(product.get("items", [])),
-                "hidden": product.get("hidden", False)
-            })
+            result.append({"key": key, "name": product.get("name", key), "emoji": product.get("emoji", "🌍"), "price": product.get("price_rub", 0), "count": count_real(product.get("items", [])), "hidden": product.get("hidden", False)})
     return jsonify({"products": result})
 
 
@@ -352,14 +314,7 @@ def seller_pending():
     result = []
     for pid, item in pending.items():
         if str(item.get("seller_id", "")) == user_id:
-            result.append({
-                "id": pid,
-                "name": item.get("name"),
-                "price": item.get("price"),
-                "status": item.get("status", "pending"),
-                "reason": item.get("reason", ""),
-                "date": item.get("date", "")
-            })
+            result.append({"id": pid, "name": item.get("name"), "price": item.get("price"), "status": item.get("status", "pending"), "reason": item.get("reason", ""), "date": item.get("date", "")})
     return jsonify({"pending": result})
 
 
@@ -389,28 +344,14 @@ def seller_submit():
     pending = load_json(PENDING_FILE)
     pid = f"pending_{int(datetime.now().timestamp())}_{user_id}"
     items = [{"number": n, "category": category} for n in numbers]
-
     pending[pid] = {
-        "seller_id": user_id,
-        "seller_username": username,
-        "name": name,
-        "price": price,
-        "desc": desc,
-        "emoji": emoji,
-        "items": items,
-        "status": "pending",
-        "date": str(datetime.now())
+        "seller_id": user_id, "seller_username": username, "name": name, "price": price,
+        "desc": desc, "emoji": emoji, "items": items, "status": "pending", "date": str(datetime.now())
     }
     save_json(PENDING_FILE, pending)
 
     for admin_id in АДМИНЫ:
-        send_telegram_message(admin_id,
-            f"📥 *Новая заявка*\n\n"
-            f"👤 Продавец: @{username or user_id}\n"
-            f"🆔 ID: `{user_id}`\n"
-            f"📦 {name}\n"
-            f"💰 {price} ₽\n"
-            f"📱 Номеров: {len(numbers)}")
+        send_telegram_message(admin_id, f"📥 *Новая заявка*\n\n👤 @{username or user_id}\n🆔 `{user_id}`\n📦 {name}\n💰 {price} ₽\n📱 Номеров: {len(numbers)}")
 
     return jsonify({"success": True, "message": "Заявка отправлена"})
 
@@ -420,7 +361,6 @@ def seller_withdraw():
     data = request.json
     user_id = str(data.get('user_id', ''))
     amount = int(data.get('amount', 0))
-
     sellers = load_json(SELLERS_FILE)
     sid = str(user_id)
     if sid not in sellers:
@@ -429,15 +369,86 @@ def seller_withdraw():
         return jsonify({"success": False, "error": "Недостаточно средств"})
     if amount < 100:
         return jsonify({"success": False, "error": "Минимум 100 ₽"})
-
     for admin_id in АДМИНЫ:
-        send_telegram_message(admin_id,
-            f"💸 *Запрос на вывод*\n\n"
-            f"👤 Продавец: @{sellers[sid].get('username')}\n"
-            f"🆔 ID: `{user_id}`\n"
-            f"💰 Сумма: {amount} ₽")
+        send_telegram_message(admin_id, f"💸 *Запрос на вывод*\n\n👤 @{sellers[sid].get('username')}\n🆔 `{user_id}`\n💰 {amount} ₽")
     return jsonify({"success": True, "message": "Запрос отправлен"})
 
+
+# ========== API ДЛЯ АДМИН-БОТА ==========
+
+@app.route('/api/admin/pending', methods=['POST'])
+def admin_pending():
+    data = request.json
+    if data.get('secret') != SYNC_SECRET:
+        return jsonify({"success": False, "error": "Неверный ключ"})
+    pending = load_json(PENDING_FILE)
+    active = []
+    for pid, p in pending.items():
+        if p.get("status") == "pending":
+            active.append({
+                "id": pid,
+                "seller_id": p.get("seller_id"),
+                "seller_username": p.get("seller_username"),
+                "name": p.get("name"),
+                "price": p.get("price"),
+                "desc": p.get("desc", ""),
+                "emoji": p.get("emoji", "🌍"),
+                "items": p.get("items", [])
+            })
+    return jsonify({"pending": active})
+
+
+@app.route('/api/admin/approve_pending', methods=['POST'])
+def admin_approve_pending():
+    data = request.json
+    if data.get('secret') != SYNC_SECRET:
+        return jsonify({"success": False, "error": "Неверный ключ"})
+    pid = data.get('pid')
+    pending = load_json(PENDING_FILE)
+    if pid not in pending:
+        return jsonify({"success": False, "error": "Заявка не найдена"})
+    p = pending[pid]
+    products = load_json(DATA_FILE)
+    seller_id = p.get("seller_id")
+    ts = int(datetime.now().timestamp())
+    key = f"seller_{seller_id}_{ts}"
+    products[key] = {
+        "name": p.get("name"), "emoji": p.get("emoji", "🌍"),
+        "price_rub": p.get("price"), "price_stars": round(p.get("price", 0) * 0.7),
+        "desc": p.get("desc", ""), "hidden": False, "items": p.get("items", []),
+        "seller_id": seller_id, "seller_verified": False
+    }
+    save_json(DATA_FILE, products)
+    pending[pid]["status"] = "approved"
+    save_json(PENDING_FILE, pending)
+    sellers = load_json(SELLERS_FILE)
+    sid = str(seller_id)
+    if sid in sellers:
+        sellers[sid]["products_count"] = sellers[sid].get("products_count", 0) + 1
+        save_json(SELLERS_FILE, sellers)
+    send_telegram_message(int(seller_id), f"✅ *Товар одобрен!*\n\n📦 {p.get('name')} — {p.get('price')} ₽\n\nОн уже в каталоге!")
+    return jsonify({"success": True})
+
+
+@app.route('/api/admin/decline_pending', methods=['POST'])
+def admin_decline_pending():
+    data = request.json
+    if data.get('secret') != SYNC_SECRET:
+        return jsonify({"success": False, "error": "Неверный ключ"})
+    pid = data.get('pid')
+    reason = data.get('reason', 'Не прошёл модерацию')
+    pending = load_json(PENDING_FILE)
+    if pid not in pending:
+        return jsonify({"success": False, "error": "Заявка не найдена"})
+    pending[pid]["status"] = "declined"
+    pending[pid]["reason"] = reason
+    save_json(PENDING_FILE, pending)
+    seller_id = pending[pid].get("seller_id")
+    send_telegram_message(int(seller_id), f"❌ *Товар отклонён:* {pending[pid].get('name')}\n\n📝 {reason}\n\nСвяжись с @zilfrec")
+    return jsonify({"success": True})
+
+
+# ========== СИНХРОНИЗАЦИЯ ==========
 
 @app.route('/api/sync_products', methods=['POST'])
 def sync_products():
