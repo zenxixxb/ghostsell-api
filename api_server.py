@@ -8,7 +8,6 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ========== ФАЙЛЫ ==========
 BALANCE_FILE = "balance.json"
 DATA_FILE = "products.json"
 ORDERS_FILE = "orders.json"
@@ -16,14 +15,16 @@ PROMO_FILE = "promo.json"
 CODE_REQUESTS_FILE = "code_requests.json"
 BONUS_FILE = "bonus.json"
 DISCOUNTS_FILE = "discounts.json"
+WHEEL_FILE = "wheel.json"
+SELLERS_FILE = "sellers.json"
+PENDING_FILE = "pending_products.json"
 
-# ========== КОНФИГ ==========
 SYNC_SECRET = "ghostsell_2026_secret_key"
 BOT_TOKEN = "8836260327:AAGxBaWF_YWpTJr1H1Q1gsdNKbkUqM_WJOQ"
 АДМИНЫ = [7940562298, 6169533449]
+КОМИССИЯ = 20
 
 
-# ========== РАБОТА С ДАННЫМИ ==========
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
@@ -55,13 +56,27 @@ def count_real(items):
     ])
 
 
-# ========== ГЛАВНАЯ ==========
+def get_or_create_seller(user_id, username):
+    sellers = load_json(SELLERS_FILE)
+    uid = str(user_id)
+    if uid not in sellers:
+        sellers[uid] = {
+            "username": username or f"user_{uid}",
+            "balance": 0,
+            "commission": КОМИССИЯ,
+            "total_sold": 0,
+            "total_earned": 0,
+            "products_count": 0
+        }
+        save_json(SELLERS_FILE, sellers)
+    return sellers[uid]
+
+
 @app.route('/')
 def index():
     return "GhostSell API работает ✅"
 
 
-# ========== БАЛАНС ==========
 @app.route('/api/balance', methods=['POST'])
 def get_balance():
     data = request.json
@@ -70,16 +85,18 @@ def get_balance():
     return jsonify({"balance": balances.get(user_id, 0)})
 
 
-# ========== ТОВАРЫ ==========
 @app.route('/api/products')
 def get_products():
     data = load_json(DATA_FILE)
+    sellers = load_json(SELLERS_FILE)
     result = []
     for key, product in data.items():
         if product.get("hidden", False):
             continue
         real = count_real(product.get("items", []))
         if real > 0:
+            seller_id = product.get("seller_id", "admin")
+            seller_info = sellers.get(str(seller_id), {})
             result.append({
                 "key": key,
                 "name": product.get("name", key),
@@ -87,13 +104,12 @@ def get_products():
                 "price": product.get("price_rub", 0),
                 "count": real,
                 "desc": product.get("desc", ""),
-                "seller": product.get("seller", "admin"),
+                "seller": seller_info.get("username", "admin"),
                 "seller_verified": product.get("seller_verified", False)
             })
     return jsonify({"products": result})
 
 
-# ========== ПОКУПКА ==========
 @app.route('/api/buy', methods=['POST'])
 def buy():
     data = request.json
@@ -107,7 +123,6 @@ def buy():
     product = products[product_key]
     price = product.get("price_rub", 0)
 
-    # Проверяем скидку с колеса
     discounts = load_json(DISCOUNTS_FILE)
     user_discount = discounts.get(user_id, 0)
     if user_discount > 0:
@@ -136,6 +151,29 @@ def buy():
     save_json(BALANCE_FILE, balances)
     save_json(DATA_FILE, products)
 
+    seller_id = product.get("seller_id", "admin")
+    commission = КОМИССИЯ
+
+    if seller_id != "admin":
+        sellers = load_json(SELLERS_FILE)
+        sid = str(seller_id)
+        if sid in sellers:
+            commission = sellers[sid].get("commission", КОМИССИЯ)
+            seller_share = round(price * (100 - commission) / 100)
+            sellers[sid]["balance"] = sellers[sid].get("balance", 0) + seller_share
+            sellers[sid]["total_sold"] = sellers[sid].get("total_sold", 0) + 1
+            sellers[sid]["total_earned"] = sellers[sid].get("total_earned", 0) + seller_share
+            save_json(SELLERS_FILE, sellers)
+
+            send_telegram_message(
+                int(sid),
+                f"💰 *Новая продажа!*\n\n"
+                f"📦 Товар: {product.get('name')}\n"
+                f"💵 Продано за: {price} ₽\n"
+                f"🏦 Комиссия магазина ({commission}%): {price - seller_share} ₽\n"
+                f"✅ Вам зачислено: {seller_share} ₽"
+            )
+
     orders = load_json(ORDERS_FILE)
     if user_id not in orders:
         orders[user_id] = []
@@ -151,7 +189,6 @@ def buy():
     })
     save_json(ORDERS_FILE, orders)
 
-    # Уведомление клиенту
     discount_text = f"\n🎰 Скидка: {user_discount}%" if user_discount > 0 else ""
     send_telegram_message(
         user_id,
@@ -162,19 +199,6 @@ def buy():
         f"💳 Остаток: {balances[user_id]} ₽"
     )
 
-    # Уведомление продавцу (если не админ)
-    seller = product.get("seller", "admin")
-    if seller != "admin":
-        try:
-            send_telegram_message(
-                int(seller),
-                f"💰 *Новая продажа!*\n\n"
-                f"📦 Товар: {product.get('name')}\n"
-                f"💵 Сумма: {price} ₽"
-            )
-        except:
-            pass
-
     return jsonify({
         "success": True,
         "number": number,
@@ -183,7 +207,6 @@ def buy():
     })
 
 
-# ========== ЗАКАЗЫ ==========
 @app.route('/api/orders', methods=['POST'])
 def get_orders():
     data = request.json
@@ -204,7 +227,6 @@ def get_orders():
     return jsonify({"orders": fixed})
 
 
-# ========== ЗАПРОС КОДА ==========
 @app.route('/api/request_code', methods=['POST'])
 def request_code():
     data = request.json
@@ -238,17 +260,14 @@ def request_code():
     return jsonify({"success": True, "message": "Запрос отправлен"})
 
 
-# ========== ЕЖЕДНЕВНЫЙ БОНУС ==========
 @app.route('/api/bonus_status', methods=['POST'])
 def bonus_status():
     data = request.json
     user_id = str(data.get('user_id', ''))
     bonuses = load_json(BONUS_FILE)
-    user_bonus = bonuses.get(user_id, {})
-    last_date = user_bonus.get('last_claim', '')
+    last_date = bonuses.get(user_id, {}).get('last_claim', '')
     today = str(datetime.now().date())
-    can_claim = last_date != today
-    return jsonify({"can_claim": can_claim})
+    return jsonify({"can_claim": last_date != today})
 
 
 @app.route('/api/claim_bonus', methods=['POST'])
@@ -258,23 +277,19 @@ def claim_bonus():
     today = str(datetime.now().date())
 
     bonuses = load_json(BONUS_FILE)
-    user_bonus = bonuses.get(user_id, {})
-
-    if user_bonus.get('last_claim') == today:
+    if bonuses.get(user_id, {}).get('last_claim') == today:
         return jsonify({"success": False, "error": "Уже забрано сегодня"})
 
-    amount = 5
     balances = load_json(BALANCE_FILE)
-    balances[user_id] = balances.get(user_id, 0) + amount
+    balances[user_id] = balances.get(user_id, 0) + 5
     save_json(BALANCE_FILE, balances)
 
     bonuses[user_id] = {"last_claim": today}
     save_json(BONUS_FILE, bonuses)
 
-    return jsonify({"success": True, "amount": amount})
+    return jsonify({"success": True, "amount": 5})
 
 
-# ========== ТОП ПОКУПАТЕЛЕЙ ==========
 @app.route('/api/top_buyers')
 def top_buyers():
     orders = load_json(ORDERS_FILE)
@@ -283,30 +298,192 @@ def top_buyers():
         for o in user_orders:
             username = o.get('username', 'anon')
             price = o.get('price_rub') or o.get('price', 0)
-            if username not in totals:
-                totals[username] = 0
-            totals[username] += price
+            totals[username] = totals.get(username, 0) + price
 
     sorted_buyers = sorted(totals.items(), key=lambda x: x[1], reverse=True)
     result = [{"username": u, "total": t} for u, t in sorted_buyers[:10]]
     return jsonify({"buyers": result})
 
 
-# ========== СКИДКИ С КОЛЕСА ==========
-@app.route('/api/save_discount', methods=['POST'])
-def save_discount():
+@app.route('/api/wheel_status', methods=['POST'])
+def wheel_status():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    wheels = load_json(WHEEL_FILE)
+    last_spin = wheels.get(user_id, {}).get('last_spin', 0)
+
+    now = datetime.now().timestamp()
+    week_seconds = 7 * 24 * 60 * 60
+
+    can_spin = (now - last_spin) >= week_seconds
+    next_spin_in = 0 if can_spin else int(week_seconds - (now - last_spin))
+
+    return jsonify({"can_spin": can_spin, "next_spin_in": next_spin_in})
+
+
+@app.route('/api/spin_wheel', methods=['POST'])
+def spin_wheel():
     data = request.json
     user_id = str(data.get('user_id', ''))
     discount = int(data.get('discount', 0))
 
-    discounts = load_json(DISCOUNTS_FILE)
-    discounts[user_id] = discount
-    save_json(DISCOUNTS_FILE, discounts)
+    wheels = load_json(WHEEL_FILE)
+    last_spin = wheels.get(user_id, {}).get('last_spin', 0)
 
-    return jsonify({"success": True})
+    now = datetime.now().timestamp()
+    if (now - last_spin) < 7 * 24 * 60 * 60:
+        return jsonify({"success": False, "error": "Ещё рано"})
+
+    wheels[user_id] = {"last_spin": now}
+    save_json(WHEEL_FILE, wheels)
+
+    if discount > 0:
+        discounts = load_json(DISCOUNTS_FILE)
+        discounts[user_id] = discount
+        save_json(DISCOUNTS_FILE, discounts)
+
+    return jsonify({"success": True, "discount": discount})
 
 
-# ========== СИНХРОНИЗАЦИЯ С АДМИН-БОТОМ ==========
+@app.route('/api/seller_profile', methods=['POST'])
+def seller_profile():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    username = data.get('username', '')
+    seller = get_or_create_seller(user_id, username)
+    return jsonify({"success": True, "seller": seller, "commission": КОМИССИЯ})
+
+
+@app.route('/api/seller_products', methods=['POST'])
+def seller_products():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    products = load_json(DATA_FILE)
+
+    result = []
+    for key, product in products.items():
+        if str(product.get("seller_id", "")) == user_id:
+            result.append({
+                "key": key,
+                "name": product.get("name", key),
+                "emoji": product.get("emoji", "🌍"),
+                "price": product.get("price_rub", 0),
+                "count": count_real(product.get("items", [])),
+                "hidden": product.get("hidden", False)
+            })
+
+    return jsonify({"products": result})
+
+
+@app.route('/api/seller_pending', methods=['POST'])
+def seller_pending():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    pending = load_json(PENDING_FILE)
+
+    result = []
+    for pid, item in pending.items():
+        if str(item.get("seller_id", "")) == user_id:
+            result.append({
+                "id": pid,
+                "name": item.get("name"),
+                "price": item.get("price"),
+                "status": item.get("status", "pending"),
+                "reason": item.get("reason", ""),
+                "date": item.get("date", "")
+            })
+
+    return jsonify({"pending": result})
+
+
+@app.route('/api/seller_submit', methods=['POST'])
+def seller_submit():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    username = data.get('username', '')
+
+    name = data.get('name', '').strip()
+    price = int(data.get('price', 0))
+    desc = data.get('desc', '').strip()
+    emoji = data.get('emoji', '🌍')
+    numbers_text = data.get('numbers', '').strip()
+    category = data.get('category', 'no_spam')
+
+    if not name or price <= 0 or not numbers_text:
+        return jsonify({"success": False, "error": "Заполни все поля"})
+
+    if price < 30:
+        return jsonify({"success": False, "error": "Минимальная цена 30 ₽"})
+
+    if price > 10000:
+        return jsonify({"success": False, "error": "Максимальная цена 10000 ₽"})
+
+    numbers = [n.strip() for n in numbers_text.split(",") if n.strip()]
+    if not numbers:
+        return jsonify({"success": False, "error": "Введи хотя бы один номер"})
+
+    pending = load_json(PENDING_FILE)
+    pid = f"pending_{int(datetime.now().timestamp())}_{user_id}"
+
+    items = [{"number": n, "category": category} for n in numbers]
+
+    pending[pid] = {
+        "seller_id": user_id,
+        "seller_username": username,
+        "name": name,
+        "price": price,
+        "desc": desc,
+        "emoji": emoji,
+        "items": items,
+        "status": "pending",
+        "date": str(datetime.now())
+    }
+    save_json(PENDING_FILE, pending)
+
+    for admin_id in АДМИНЫ:
+        send_telegram_message(
+            admin_id,
+            f"📥 *Новая заявка на товар*\n\n"
+            f"👤 Продавец: @{username or user_id}\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"📦 Название: {name}\n"
+            f"💰 Цена: {price} ₽\n"
+            f"📱 Номеров: {len(numbers)}"
+        )
+
+    return jsonify({"success": True, "message": "Заявка отправлена"})
+
+
+@app.route('/api/seller_withdraw', methods=['POST'])
+def seller_withdraw():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    amount = int(data.get('amount', 0))
+
+    sellers = load_json(SELLERS_FILE)
+    sid = str(user_id)
+
+    if sid not in sellers:
+        return jsonify({"success": False, "error": "Продавец не найден"})
+
+    if sellers[sid].get("balance", 0) < amount:
+        return jsonify({"success": False, "error": "Недостаточно средств"})
+
+    if amount < 100:
+        return jsonify({"success": False, "error": "Минимум 100 ₽"})
+
+    for admin_id in АДМИНЫ:
+        send_telegram_message(
+            admin_id,
+            f"💸 *Запрос на вывод*\n\n"
+            f"👤 Продавец: @{sellers[sid].get('username')}\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"💰 Сумма: {amount} ₽"
+        )
+
+    return jsonify({"success": True, "message": "Запрос отправлен"})
+
+
 @app.route('/api/sync_products', methods=['POST'])
 def sync_products():
     data = request.json
