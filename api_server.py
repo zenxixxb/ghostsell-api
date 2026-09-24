@@ -20,7 +20,7 @@ SELLERS_FILE = "sellers.json"
 PENDING_FILE = "pending_products.json"
 
 SYNC_SECRET = "ghostsell_2026_secret_key"
-BOT_TOKEN = "8836260327:AAGxBaWF_YWpTJr1H1Q1gsdNKbkUqM_WJOQ"
+BOT_TOKEN = "8836260327:AAEqVehgIOOQ_R9XFMgcFN3mNf1P-u_Hdgo"
 АДМИНЫ = [7940562298, 6169533449]
 КОМИССИЯ = 20
 
