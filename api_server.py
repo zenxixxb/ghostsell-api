@@ -2,6 +2,7 @@ import json
 import os
 import time
 import requests
+import re
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -17,7 +18,6 @@ PROMO_FILE = "promo.json"
 CODE_REQUESTS_FILE = "code_requests.json"
 BONUS_FILE = "bonus.json"
 DISCOUNTS_FILE = "discounts.json"
-WHEEL_FILE = "wheel.json"
 SELLERS_FILE = "sellers.json"
 PENDING_FILE = "pending_products.json"
 CHATS_FILE = "chats.json"
@@ -34,7 +34,6 @@ CHANNEL_USERNAME = "@GhostSell_channel"
 
 # ========== ЭКОНОМИКА ==========
 BONUS_COOLDOWN_SEC = 24 * 60 * 60
-WHEEL_COOLDOWN_SEC = 7 * 24 * 60 * 60
 MIN_DEPOSIT_FOR_BONUS = 50
 BONUS_MIN = 5
 BONUS_MAX = 20
@@ -205,6 +204,12 @@ def get_products():
     for key, product in data.items():
         if product.get("hidden", False):
             continue
+            
+        # Блокировка РФ на уровне каталога
+        name_lower = product.get("name", key).lower()
+        if product.get("country") == "RU" or "россия" in name_lower or "+7" in name_lower:
+            continue
+            
         real = count_real(product.get("items", []))
         if real > 0:
             seller_id = product.get("seller_id", "admin")
@@ -302,6 +307,263 @@ def buy():
     save_json(ORDERS_FILE, orders)
 
     discount_text = f"\n🎰 Скидка: {user_discount}%" if user_discount > 0 else ""
+    send_telegram_message(user_id,
+        f"✅ *Покупка совершена!*\n\n📦 {product.get('name')}\n💰 {price} ₽{discount_text}\n📱 Номер: `{number}`\n💳 Остаток: {balances[user_id]} ₽")
+
+    return jsonify({
+        "success": True,
+        "number": number,
+        "balance": balances[user_id],
+        "message": f"Покупка успешна! Номер: {number}"
+    })
+
+
+@app.route('/api/orders', methods=['POST'])
+def get_orders():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    orders = load_json(ORDERS_FILE)
+    user_orders = orders.get(user_id, [])
+    fixed = []
+    for o in user_orders[::-1]:
+        fixed.append({
+            "product": o.get("product", "—"),
+            "price": o.get("price_rub") or o.get("price", 0),
+            "status": o.get("status", "—"),
+            "number": o.get("number") or o.get("phone") or o.get("item", "—"),
+            "date": o.get("date", "")
+        })
+    return jsonify({"orders": fixed})
+
+
+# ========== ЗАПРОС КОДА ==========
+@app.route('/api/request_code', methods=['POST'])
+def request_code():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    phone = data.get('phone', '')
+    order_index = data.get('order_index', 0)
+    if not phone:
+        return jsonify({"success": False, "error": "Нет номера телефона"})
+    requests_data = load_json(CODE_REQUESTS_FILE)
+    if user_id not in requests_data:
+        requests_data[user_id] = []
+    requests_data[user_id].append({
+        "phone": phone, "order_index": order_index,
+        "timestamp": str(datetime.now()), "status": "в ожидании"
+    })
+    save_json(CODE_REQUESTS_FILE, requests_data)
+    for admin_id in АДМИНЫ:
+        send_telegram_message(admin_id, f"🔑 *Запрос кода*\n\n👤 ID: `{user_id}`\n📱 Номер: `{phone}`\n📦 Заказ: #{order_index}")
+    return jsonify({"success": True, "message": "Запрос отправлен"})
+
+
+# ========== БОНУС ==========
+@app.route('/api/bonus_status', methods=['POST'])
+def bonus_status():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    bonuses = load_json(BONUS_FILE)
+    last_claim = bonuses.get(user_id, {}).get('last_claim_ts', 0)
+    total_deposit = get_total_deposit(user_id)
+
+    can_claim = (now_ts() - last_claim) >= BONUS_COOLDOWN_SEC
+    deposit_ok = total_deposit >= MIN_DEPOSIT_FOR_BONUS
+
+    return jsonify({
+        "can_claim": can_claim and deposit_ok,
+        "deposit_ok": deposit_ok,
+        "total_deposit": total_deposit,
+        "next_claim_in": 0 if can_claim else (BONUS_COOLDOWN_SEC - (now_ts() - last_claim))
+    })
+
+
+@app.route('/api/claim_bonus', methods=['POST'])
+def claim_bonus():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    amount = int(data.get('amount', BONUS_MIN))
+    amount = max(BONUS_MIN, min(BONUS_MAX, amount))
+
+    total_deposit = get_total_deposit(user_id)
+    if total_deposit < MIN_DEPOSIT_FOR_BONUS:
+        return jsonify({"success": False, "error": f"Нужен депозит от {MIN_DEPOSIT_FOR_BONUS} ₽"})
+
+    bonuses = load_json(BONUS_FILE)
+    last_claim = bonuses.get(user_id, {}).get('last_claim_ts', 0)
+    if (now_ts() - last_claim) < BONUS_COOLDOWN_SEC:
+        left = BONUS_COOLDOWN_SEC - (now_ts() - last_claim)
+        return jsonify({"success": False, "error": f"Бонус уже получен. Осталось: {left} сек"})
+
+    balances = load_json(BALANCE_FILE)
+    balances[user_id] = balances.get(user_id, 0) + amount
+    save_json(BALANCE_FILE, balances)
+
+    bonuses[user_id] = {
+        "last_claim_ts": now_ts(),
+        "last_claim_date": str(datetime.now()),
+        "total_claimed": bonuses.get(user_id, {}).get("total_claimed", 0) + amount
+    }
+    save_json(BONUS_FILE, bonuses)
+
+    send_telegram_message(user_id, f"🎁 *Ежедневный бонус:* +{amount} ₽\n💳 Баланс: {balances[user_id]} ₽")
+
+    return jsonify({"success": True, "amount": amount, "balance": balances[user_id]})
+
+
+# ========== ТОП ==========
+@app.route('/api/top_buyers')
+def top_buyers():
+    orders = load_json(ORDERS_FILE)
+    totals = {}
+    for user_id, user_orders in orders.items():
+        for o in user_orders:
+            username = o.get('username', 'anon')
+            price = o.get('price_rub') or o.get('price', 0)
+            totals[username] = totals.get(username, 0) + price
+    sorted_buyers = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+    result = [{"username": u, "total": t} for u, t in sorted_buyers[:10]]
+    return jsonify({"buyers": result})
+
+
+# ========== ПРОДАВЕЦ ==========
+@app.route('/api/seller_profile', methods=['POST'])
+def seller_profile():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    username = data.get('username', '')
+    seller = get_or_create_seller(user_id, username)
+    rating, reviews_count = calc_seller_rating(user_id)
+    seller["rating"] = rating
+    seller["reviews_count"] = reviews_count
+    return jsonify({"success": True, "seller": seller, "commission": КОМИССИЯ})
+
+
+@app.route('/api/seller_products', methods=['POST'])
+def seller_products():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    products = load_json(DATA_FILE)
+    result = []
+    for key, product in products.items():
+        if str(product.get("seller_id", "")) == user_id:
+            result.append({
+                "key": key, "name": product.get("name", key),
+                "emoji": product.get("emoji", "🌍"),
+                "price": product.get("price_rub", 0),
+                "count": count_real(product.get("items", [])),
+                "hidden": product.get("hidden", False)
+            })
+    return jsonify({"products": result})
+
+
+@app.route('/api/seller_submit', methods=['POST'])
+def seller_submit():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    username = data.get('username', '')
+    name = data.get('name', '').strip()
+    price = int(data.get('price', 0))
+    desc = data.get('desc', '').strip()
+    emoji = data.get('emoji', '🌍')
+    numbers_text = data.get('numbers', '').strip()
+    category = data.get('category', 'no_spam')
+
+    if not name or price <= 0 or not numbers_text:
+        return jsonify({"success": False, "error": "Заполни все поля"})
+    if price < 30:
+        return jsonify({"success": False, "error": "Минимальная цена 30 ₽"})
+    if price > 10000:
+        return jsonify({"success": False, "error": "Максимальная цена 10000 ₽"})
+
+    numbers = [n.strip() for n in numbers_text.split(",") if n.strip()]
+    if not numbers:
+        return jsonify({"success": False, "error": "Введи хотя бы один номер"})
+
+    # Жёсткий блок РФ
+    ru_pattern = re.compile(r'(^7|^\+7|RU|Россия|Russian)', re.IGNORECASE)
+    for n in numbers:
+        if ru_pattern.search(n):
+            return jsonify({"success": False, "error": "Российские номера временно не принимаются"})
+
+    pending = load_json(PENDING_FILE)
+    pid = f"pending_{now_ts()}_{user_id}"
+    items = [{"number": n, "category": category} for n in numbers]
+    pending[pid] = {
+        "seller_id": user_id, "seller_username": username,
+        "name": name, "price": price, "desc": desc, "emoji": emoji,
+        "items": items, "status": "pending", "date": str(datetime.now())
+    }
+    save_json(PENDING_FILE, pending)
+
+    for admin_id in АДМИНЫ:
+        send_telegram_message(admin_id, f"📥 *Новая заявка*\n\n👤 @{username or user_id}\n🆔 `{user_id}`\n📦 {name}\n💰 {price} ₽\n📱 Номеров: {len(numbers)}")
+
+    return jsonify({"success": True, "message": "Заявка отправлена"})
+
+
+@app.route('/api/seller_withdraw', methods=['POST'])
+def seller_withdraw():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    amount = int(data.get('amount', 0))
+    sellers = load_json(SELLERS_FILE)
+    sid = str(user_id)
+    if sid not in sellers:
+        return jsonify({"success": False, "error": "Продавец не найден"})
+    if sellers[sid].get("balance", 0) < amount:
+        return jsonify({"success": False, "error": "Недостаточно средств"})
+    if amount < 100:
+        return jsonify({"success": False, "error": "Минимум 100 ₽"})
+    for admin_id in АДМИНЫ:
+        send_telegram_message(admin_id, f"💸 *Запрос на вывод*\n\n👤 @{sellers[sid].get('username')}\n🆔 `{user_id}`\n💰 {amount} ₽")
+    return jsonify({"success": True, "message": "Запрос отправлен"})
+
+
+# ========== ОТЗЫВЫ ==========
+@app.route('/api/reviews/add', methods=['POST'])
+def reviews_add():
+    data = request.json
+    user_id = str(data.get('user_id', ''))
+    seller_id = str(data.get('seller_id', ''))
+    rating = int(data.get('rating', 5))
+    comment = data.get('comment', '').strip()
+
+    if not user_id or not seller_id:
+        return jsonify({"success": False, "error": "Нет данных"})
+    if rating < 1 or rating > 5:
+        return jsonify({"success": False, "error": "Рейтинг от 1 до 5"})
+
+    reviews = load_json(REVIEWS_FILE)
+    if seller_id not in reviews:
+        reviews[seller_id] = []
+
+    reviews[seller_id] = [r for r in reviews[seller_id] if str(r.get("from_user")) != user_id]
+    reviews[seller_id].append({
+        "from_user": user_id, "rating": rating,
+        "comment": comment, "date": str(datetime.now())
+    })
+    save_json(REVIEWS_FILE, reviews)
+
+    avg, count = calc_seller_rating(seller_id)
+    send_telegram_message(int(seller_id), f"⭐ *Новый отзыв:* {rating}/5\n💬 {comment}\n\nСредний рейтинг: {avg} ({count} отзывов)")
+
+    return jsonify({"success": True, "rating": avg, "reviews_count": count})
+
+
+@app.route('/api/reviews/list', methods=['POST'])
+def reviews_list():
+    data = request.json
+    seller_id = str(data.get('seller_id', ''))
+    reviews = load_json(REVIEWS_FILE).get(seller_id, [])
+    return jsonify({"reviews": reviews[::-1][:50]})
+
+
+# ========== АДМИН: МОДЕРАЦИЯ ==========
+@app.route('/api/admin/pending', methods=['POST'])
+def admin_pending():
+    data = request.json
+    if data.get('seка: {user_discount}%" if user_discount > 0 else ""
     send_telegram_message(user_id,
         f"✅ *Покупка совершена!*\n\n📦 {product.get('name')}\n💰 {price} ₽{discount_text}\n📱 Номер: `{number}`\n💳 Остаток: {balances[user_id]} ₽")
 
